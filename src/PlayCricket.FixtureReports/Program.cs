@@ -42,7 +42,8 @@ IReportDataSource dataSource = useSample
 string baseDir = AppContext.BaseDirectory;
 var htmlBuilder = new ReportHtmlBuilder(
     templateDir: Path.Combine(baseDir, "Templates"),
-    chartJsPath: Path.Combine(baseDir, "Assets", "chart.umd.js"));
+    chartJsPath: Path.Combine(baseDir, "Assets", "chart.umd.js"),
+    logoPath: Path.Combine(baseDir, "Assets", "play-cricket-logo.png"));
 
 Directory.CreateDirectory(outputDir);
 

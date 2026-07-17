@@ -15,14 +15,16 @@ public sealed class ReportHtmlBuilder
     private readonly Template _template;
     private readonly string _chartJs;
     private readonly string _templateDir;
+    private readonly string _logoDataUri;
 
-    public ReportHtmlBuilder(string templateDir, string chartJsPath)
+    public ReportHtmlBuilder(string templateDir, string chartJsPath, string logoPath)
     {
         _templateDir = templateDir;
         _template = Template.Parse(File.ReadAllText(Path.Combine(templateDir, "fixture-report.html")));
         if (_template.HasErrors)
             throw new InvalidOperationException($"Template parse errors: {string.Join("; ", _template.Messages)}");
         _chartJs = File.ReadAllText(chartJsPath);
+        _logoDataUri = "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(logoPath));
     }
 
     public string Build(LeagueReport report)
@@ -35,6 +37,7 @@ public sealed class ReportHtmlBuilder
             ["MonthTitle"] = report.ReportMonth.ToString("MMMM-yyyy", Culture),
             ["MonthName"] = monthName,
             ["ChartJs"] = _chartJs,
+            ["LogoDataUri"] = _logoDataUri,
             ["ChartDataJson"] = BuildChartJson(report),
             ["MonthHeadlines"] = report.MonthHeadlines.Select(YearRow).ToList(),
             ["SeasonHeadlines"] = report.SeasonHeadlines.Select(YearRow).ToList(),
