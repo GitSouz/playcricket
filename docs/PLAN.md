@@ -84,14 +84,17 @@ Implementation:
 
 ### Data refresh
 
-The `SSRS.RefreshFixtureData` proc's cleanup logic (name sanitisation, county
-renames, league ID remap 8205→15363, Northumberland league rename) is retained
-as a proc the job executes first. **Open question below re: the actual data
-load** — the version supplied truncates `Fact.Fixture` and re-inserts from
-itself, which as written would empty the table; the real source feed
-(previously the SSIS package) needs to be identified and ported (e.g. to a
-query against the source system/staging DB, or an Azure Data Factory copy if
-it crosses servers).
+The old `SSRS.RefreshFixtureData` proc did two jobs: (a) copy fixture data
+from PROD to DEV over a linked server, and (b) apply reporting cleanups (name
+sanitisation, county renames, league ID remap 8205→15363, Northumberland
+league rename). The PROD→DEV copy is **not needed going forward** — the job
+reads the Azure SQL database directly.
+
+The cleanup rules are still required, but rather than mutating `Fact.Fixture`
+and `SSRS.League_Sites` in place each run, they move into the reporting layer:
+either views the report queries select from, or inline in the dataset queries.
+That makes the pipeline read-only against the source tables and removes the
+truncate/reload step entirely.
 
 ### Validation & alerting (replaces step 5 eyeballing)
 
@@ -128,8 +131,8 @@ given month.
 
 **Phase 2 — Pipeline & integrations**
 Storage upload, Dotdigital folder-create + document upload with retries,
-data-refresh step, containerise, deploy as scheduled Container Apps Job to DEV,
-GitHub Actions CI/CD.
+containerise, deploy as scheduled Container Apps Job to DEV, GitHub Actions
+CI/CD.
 
 **Phase 3 — Validation, alerting, parallel run**
 Automated checks + notifications. Run one month in parallel with the old
@@ -141,19 +144,26 @@ Azure SQL), SSRS reports, `[dbo].[FixtureReportList]` manual edits, the Logic
 App, and the Postman step. Update the runbook to "it runs itself; here's how to
 re-run a month manually" (job supports an optional month parameter for reruns).
 
+## Resolved decisions
+
+1. **Data source:** the old refresh proc's truncate/reload was a PROD→DEV
+   linked-server copy — not needed going forward; the job queries Azure SQL
+   directly. Cleanup rules move into the reporting layer (see Data refresh).
+2. **Report list:** the set of reports per run is whatever
+   `[dbo].[FixtureReportList]` returns; the pipeline keeps that proc as the
+   single source of truth (parameterised by month rather than edited monthly).
+3. **Dotdigital folder structure:** `FixtureReports{yyyy}/{month}` — the job
+   looks up (or creates) the `FixtureReports{yyyy}` parent folder, then creates
+   the month folder under it and uploads there.
+4. **Credential rotation:** Dotdigital API credentials to be rotated by the
+   team; new credentials go straight into Key Vault. The old
+   `PlayCricketDotmailerUploadFixtureReportsDEV` Logic App (which embeds the
+   old password in its definition) should be deleted from the
+   `RG-UKS-DEV-LOGICAPPS` resource group.
+
 ## Open questions (Phase 0)
 
-1. **Where does `Fact.Fixture` actually get loaded from?** The supplied proc
-   selects from the table it just truncated, so the real load (previously the
-   SSIS package `DMSSRS Fixture Reports`?) must come from elsewhere — source
-   DB/API and connectivity from Azure needed.
-2. Is the league list for report generation the same as what
-   `[dbo].[FixtureReportList]` returns today (i.e. `SSRS.League_Sites`), and
-   what decides which leagues get a report each month?
-3. Dotdigital folder structure: confirm parent folder the monthly folders are
-   created under, and naming convention (the current folder ID 1554199 is
-   hardcoded — what does its path look like?).
-4. Confirm target environments/subscriptions for DEV and PROD, and whether an
+1. Confirm target environments/subscriptions for DEV and PROD, and whether an
    Azure Container Registry already exists.
-5. Any consumers of the file-share copies besides Dotdigital (i.e. must the
+2. Any consumers of the file-share copies besides Dotdigital (i.e. must the
    `externallysharedfiles` archive be kept)?
