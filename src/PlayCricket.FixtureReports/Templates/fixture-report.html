@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ LeagueName }} — {{ MonthTitle }}</title>
+<script>{{ ChartJs }}</script>
+<style>
+  :root {
+    --navy: #21388f;
+    --red: #ee2724;
+    --red-light: #f2c9cd;
+    --cyan: #2fb3e3;
+    --grey-head: #bfbfbf;
+    --border: #b3b3b3;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { font-family: "Segoe UI", Arial, sans-serif; font-size: 10.5pt; color: #1a1a1a; }
+  .page { page-break-after: always; padding: 4mm 2mm 0 2mm; }
+  .page:last-child { page-break-after: avoid; }
+
+  /* ---- Repeating page header ---- */
+  .report-header { display: flex; align-items: flex-start; margin-bottom: 7mm; }
+  .logo { width: 30mm; flex: 0 0 30mm; padding-top: 2mm; }
+  .logo .pc { color: #0d2f6c; font-weight: 800; font-size: 11pt; letter-spacing: -0.5px; }
+  .logo .pc .com { color: #0d2f6c; font-size: 8pt; display: block; text-align: right; }
+  .header-bars { flex: 1; margin-left: 12mm; margin-right: 18mm; }
+  .bar-title { background: var(--navy); color: #fff; text-align: center; font-size: 13pt;
+               letter-spacing: 1px; text-transform: uppercase; padding: 2.5mm 4mm; }
+  .bar-month { background: var(--red); color: #fff; text-align: center; font-size: 11pt; padding: 1.5mm 4mm; }
+
+  /* ---- Section banners ---- */
+  .banner { background: var(--navy); color: #fff; text-align: center; text-transform: uppercase;
+            font-size: 13pt; letter-spacing: 1.5px; padding: 2mm; }
+  .sub-banner { background: var(--red); color: #fff; text-align: center; text-transform: uppercase;
+                font-size: 10.5pt; letter-spacing: 0.5px; padding: 1.2mm; }
+
+  /* ---- Stats block: coloured sidebar + table ---- */
+  .stats-block { display: flex; margin-bottom: 4mm; }
+  .sidebar { flex: 0 0 24mm; display: flex; align-items: center; justify-content: center; }
+  .sidebar span { writing-mode: vertical-rl; transform: rotate(180deg); color: #fff;
+                  text-transform: uppercase; font-size: 11pt; letter-spacing: 1px;
+                  text-align: center; line-height: 1.25; }
+  .sidebar.month { background: var(--red); }
+  .sidebar.season { background: var(--cyan); }
+
+  table.stats { border-collapse: collapse; flex: 1; }
+  table.stats th, table.stats td { border: 0.3mm solid var(--border); text-align: center;
+                                   padding: 1.6mm 1mm; font-weight: normal; }
+  table.stats th { background: var(--grey-head); font-size: 10.5pt; }
+  table.stats col.division { width: 22%; }
+
+  /* ---- Chart boxes ---- */
+  .chart-box { border: 0.3mm solid var(--border); padding: 4mm 6mm 2mm 2mm; margin-bottom: 5mm; }
+  .chart-box canvas { width: 100%; height: 62mm; }
+
+  /* ---- Watch lists ---- */
+  .watch { margin-bottom: 6mm; }
+  table.watch-table { border-collapse: collapse; width: 100%; }
+  table.watch-table th, table.watch-table td { border: 0.3mm solid var(--border); text-align: center;
+                                               padding: 1.6mm 1mm; }
+  table.watch-table th { background: var(--grey-head); font-weight: bold; font-size: 10pt; }
+  .gap { height: 4mm; }
+</style>
+</head>
+<body>
+
+  <!-- ============ PAGE 1: HEADLINES ============ -->
+  <div class="page">
+    {{ include 'header' }}
+
+    <div class="banner">Headlines</div>
+    <div class="stats-block">
+      <div class="sidebar month"><span>{{ MonthName }}</span></div>
+      <table class="stats" style="width:100%">
+        <tr><th>Year</th><th>Completed</th><th>Played</th><th>Cancelled</th><th>Abandoned</th><th>Conceded</th><th>Short-Sided</th></tr>
+        {{ for row in MonthHeadlines }}
+        <tr><td>{{ row.Year }}</td><td>{{ row.Completed }}</td><td>{{ row.Played }}</td><td>{{ row.Cancelled }}</td><td>{{ row.Abandoned }}</td><td>{{ row.Conceded }}</td><td>{{ row.ShortSided }}</td></tr>
+        {{ end }}
+      </table>
+    </div>
+
+    <div class="chart-box"><canvas id="chartMonth"></canvas></div>
+
+    <div class="stats-block">
+      <div class="sidebar season"><span>Season<br>to date</span></div>
+      <table class="stats" style="width:100%">
+        <tr><th>Year</th><th>Completed</th><th>Played</th><th>Cancelled</th><th>Abandoned</th><th>Conceded</th><th>Short-Sided</th></tr>
+        {{ for row in SeasonHeadlines }}
+        <tr><td>{{ row.Year }}</td><td>{{ row.Completed }}</td><td>{{ row.Played }}</td><td>{{ row.Cancelled }}</td><td>{{ row.Abandoned }}</td><td>{{ row.Conceded }}</td><td>{{ row.ShortSided }}</td></tr>
+        {{ end }}
+      </table>
+    </div>
+
+    <div class="chart-box"><canvas id="chartSeason"></canvas></div>
+  </div>
+
+  <!-- ============ PAGE 2: DIVISIONAL HEADLINES ============ -->
+  <div class="page">
+    {{ include 'header' }}
+
+    <div class="banner">Divisional Headlines</div>
+    <div class="stats-block">
+      <div class="sidebar month"><span>{{ MonthName }}</span></div>
+      <table class="stats" style="width:100%">
+        <tr><th>Division</th><th>Completed</th><th>Played</th><th>Cancelled</th><th>Abandoned</th><th>Conceded</th><th>Short-Sided</th></tr>
+        {{ for row in MonthDivisions }}
+        <tr><td>{{ row.Division }}</td><td>{{ row.Completed }}</td><td>{{ row.Played }}</td><td>{{ row.Cancelled }}</td><td>{{ row.Abandoned }}</td><td>{{ row.Conceded }}</td><td>{{ row.ShortSided }}</td></tr>
+        {{ end }}
+      </table>
+    </div>
+
+    <div class="gap"></div>
+
+    <div class="stats-block">
+      <div class="sidebar season"><span>Season to<br>date</span></div>
+      <table class="stats" style="width:100%">
+        <tr><th>Division</th><th>Completed</th><th>Played</th><th>Cancelled</th><th>Abandoned</th><th>Conceded</th><th>Short-Sided</th></tr>
+        {{ for row in SeasonDivisions }}
+        <tr><td>{{ row.Division }}</td><td>{{ row.Completed }}</td><td>{{ row.Played }}</td><td>{{ row.Cancelled }}</td><td>{{ row.Abandoned }}</td><td>{{ row.Conceded }}</td><td>{{ row.ShortSided }}</td></tr>
+        {{ end }}
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ PAGE 3: WATCH LISTS ============ -->
+  <div class="page">
+    {{ include 'header' }}
+
+    <div class="watch">
+      <div class="banner">Club and Team Watch List #1</div>
+      <div class="sub-banner">Cancelled flag: 2 or more games cancelled in {{ MonthName }}</div>
+      <table class="watch-table">
+        <tr><th style="width:26%">Home Club Name</th><th style="width:20%">Home Team Name</th><th>Cancelled</th><th>Abandoned</th><th>Total</th></tr>
+        {{ for row in CancelledWatchList }}
+        <tr><td>{{ row.HomeClubName }}</td><td>{{ row.HomeTeamName }}</td><td>{{ row.Cancelled }}</td><td>{{ row.Abandoned }}</td><td>{{ row.Total }}</td></tr>
+        {{ end }}
+      </table>
+    </div>
+
+    <div class="watch">
+      <div class="banner">Club and Team Watch List #2</div>
+      <div class="sub-banner">Concession flag: 2 or more games conceded or short sided in {{ MonthName }}</div>
+      <table class="watch-table">
+        <tr><th style="width:26%">Club Name</th><th style="width:20%">Team</th><th>Conceded</th><th>Short Sided</th><th>Total</th></tr>
+        {{ for row in ConcededWatchList }}
+        <tr><td>{{ row.ClubName }}</td><td>{{ row.Team }}</td><td>{{ row.Conceded }}</td><td>{{ row.ShortSided }}</td><td>{{ row.Total }}</td></tr>
+        {{ end }}
+      </table>
+    </div>
+  </div>
+
+<script>
+  const chartData = {{ ChartDataJson }};
+
+  function makeChart(canvasId, data) {
+    new Chart(document.getElementById(canvasId), {
+      type: 'bar',
+      data: {
+        labels: data.labels,
+        datasets: data.series.map(s => ({
+          label: s.label,
+          data: s.values,
+          backgroundColor: s.color,
+          barPercentage: 0.55,
+          categoryPercentage: 0.55,
+        })),
+      },
+      options: {
+        animation: false,
+        responsive: false,
+        devicePixelRatio: 2,
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 24, boxHeight: 10, font: { size: 11 } } },
+        },
+        scales: {
+          y: {
+            min: 0, max: 120,
+            ticks: { stepSize: 20, callback: v => v + '%', font: { size: 11 } },
+            title: { display: true, text: '% of Completed Matches', font: { size: 10 } },
+            grid: { color: '#d9d9d9' },
+          },
+          x: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 11 } } },
+        },
+      },
+    });
+  }
+
+  for (const canvas of document.querySelectorAll('canvas')) {
+    // Fix canvas pixel size to its CSS box before Chart.js takes over (responsive: false).
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+  }
+  makeChart('chartMonth', chartData.month);
+  makeChart('chartSeason', chartData.season);
+  window.__chartsReady = true;
+</script>
+</body>
+</html>
