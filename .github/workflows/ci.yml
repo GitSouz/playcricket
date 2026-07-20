@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: dotnet build src/PlayCricket.FixtureReports -c Release
+
+      - name: Smoke test — generate sample PDFs
+        run: |
+          npx --yes playwright@1.61.0 install --with-deps chromium
+          dotnet run --project src/PlayCricket.FixtureReports -c Release -- \
+            --month 2026-04 --sample --output ./smoke-output
+          ls -la ./smoke-output
+
+      - name: Upload sample PDFs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-reports
+          path: ./smoke-output/*.pdf
+
+      - name: Validate container image builds
+        run: docker build -t playcricket-fixture-reports:ci .
+
+  # Builds and pushes the container image, then points the Container Apps Job
+  # at it. Requires repo variables ACR_NAME, AZURE_RESOURCE_GROUP, ACA_JOB_NAME
+  # and an AZURE_CREDENTIALS secret (or switch to OIDC federated credentials).
+  # Skipped until those are configured.
+  deploy:
+    if: github.ref == 'refs/heads/main' && vars.ACR_NAME != ''
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push image
+        run: |
+          az acr build \
+            --registry ${{ vars.ACR_NAME }} \
+            --image playcricket-fixture-reports:${{ github.sha }} \
+            --image playcricket-fixture-reports:latest \
+            .
+
+      - name: Update Container Apps Job image
+        run: |
+          az containerapp job update \
+            --name ${{ vars.ACA_JOB_NAME }} \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --image ${{ vars.ACR_NAME }}.azurecr.io/playcricket-fixture-reports:${{ github.sha }}

@@ -129,10 +129,10 @@ rendering; match the existing PDF pixel-close; unit/snapshot tests against a
 known month's data. Deliverable: CLI run locally produces correct PDFs for a
 given month.
 
-**Phase 2 — Pipeline & integrations**
+**Phase 2 — Pipeline & integrations** *(code complete — deployment pending)*
 Storage upload, Dotdigital folder-create + document upload with retries,
 containerise, deploy as scheduled Container Apps Job to DEV, GitHub Actions
-CI/CD.
+CI/CD. See docs/deployment.md.
 
 **Phase 3 — Validation, alerting, parallel run**
 Automated checks + notifications. Run one month in parallel with the old

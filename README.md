@@ -31,6 +31,14 @@ dotnet run -- --month 2026-04 --sample --output ./output
 | `--month yyyy-MM` | Reporting month (defaults to previous calendar month) |
 | `--sample` | Use built-in sample data — no database needed |
 | `--output dir` | Where to write the PDFs (default `./output`) |
+| `--upload` | Archive PDFs to the Azure file share and upload to Dotdigital |
+
+Without `--sample` the Azure SQL connection string comes from
+`PLAYCRICKET_SQL_CONNECTION`; `--upload` additionally needs
+`ARCHIVE_STORAGE_CONNECTION`, `DOTDIGITAL_API_USER` and
+`DOTDIGITAL_API_PASSWORD` (full list in `Program.cs`). Deployment as a
+scheduled Azure Container Apps Job is described in
+[docs/deployment.md](docs/deployment.md).
 
 Output naming follows the existing convention:
 `FixtureReport__{League_Name}_{LeagueId}_{yyyyMMdd}.pdf`.
