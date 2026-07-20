@@ -10,6 +10,11 @@ using PlayCricket.FixtureReports.Templating;
 // --month   Reporting month (yyyy-MM). Defaults to the previous calendar month.
 // --sample  Use the built-in sample data source (no database required).
 // --output  Output directory for generated PDFs. Defaults to ./output.
+//
+// Without --sample, the Azure SQL connection string is read from the
+// PLAYCRICKET_SQL_CONNECTION environment variable. Use
+// "Authentication=Active Directory Default" in it for managed identity /
+// developer Entra sign-in instead of SQL passwords.
 
 DateOnly reportMonth = DateOnly.FromDateTime(DateTime.Today).AddMonths(-1);
 reportMonth = new DateOnly(reportMonth.Year, reportMonth.Month, 1);
@@ -35,9 +40,21 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-IReportDataSource dataSource = useSample
-    ? new SampleDataSource()
-    : throw new NotSupportedException("SQL data source arrives in Phase 2 — run with --sample for now.");
+IReportDataSource dataSource;
+if (useSample)
+{
+    dataSource = new SampleDataSource();
+}
+else
+{
+    string? connectionString = Environment.GetEnvironmentVariable("PLAYCRICKET_SQL_CONNECTION");
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        Console.Error.WriteLine("PLAYCRICKET_SQL_CONNECTION is not set. Set it, or run with --sample.");
+        return 2;
+    }
+    dataSource = new SqlReportDataSource(connectionString);
+}
 
 string baseDir = AppContext.BaseDirectory;
 var htmlBuilder = new ReportHtmlBuilder(
