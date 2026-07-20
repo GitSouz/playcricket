@@ -71,14 +71,30 @@ date.
 4. The league ID remap (8205 ↔ 15363, Northumberland rename) appears inside
    `League_SeasonCurrLast_STD` as well as in the refresh proc.
 
-## Remaining unknown: the table-refresh logic
+## Resolved: refresh procs captured and ported
 
-The last missing piece of the legacy chain is the set of stored procedures the
-`PlaycricketV2_SSRS_Refresh` SQL Agent job ran (its steps 1–5) to populate the
-SSRS base tables above from `Fact.Fixture`. Options for the new pipeline:
+The five `PlaycricketV2_SSRS_Refresh` procs are archived in
+`docs/legacy-procs/` and their logic ported to month-parameterised queries in
+`src/PlayCricket.FixtureReports/Sql/`, computed live from `fact.Fixture` — no
+refresh step, no snapshot tables, no yearly table churn. Key behaviours
+carried over:
 
-- **Preferred:** obtain those proc definitions and fold their logic into
-  month-parameterised queries/views over `Fact.Fixture`, removing both the
-  refresh step and the yearly "create the {yyyy} tables" maintenance.
-- **Fallback:** keep running the legacy refresh procs from the job before
-  generating (works unchanged, keeps the yearly table churn).
+- Result mapping `Drawn`/`Tie` → `Win`, `NULL` → `No Result`; only fixtures
+  with a non-null `Result` are counted (so `No Result` is always 0).
+- Short-sided = `ShortSidedFixtureRef = 1`.
+- Watch lists: despite the legacy "Last5Games" naming, the window was the
+  previous calendar month (the per-team ROW_NUMBER was computed but never
+  used). Thresholds: cancelled `> 1`; conceded + short-sided `> 1`; games are
+  attributed via `Cancelled_Club` / `Abandoned_Club` /
+  `ISNULL(Conceded_Home, Conceded_Away)` / `ShortSidedTeamName`.
+- Club exclusions preserved per query as the procs had them (9195 for month
+  queries; 9195/11477/8141 for watch lists and division season; plus 12251
+  and league 9039 for league season) — including their `OR` quirk, which in
+  practice only excludes fixtures where *both* sides are excluded clubs.
+- Season windows from `lkp.Season` (`CurrLast` = `C`/`L`) — still relative to
+  run time; the reporting month itself is a real parameter, fixing the legacy
+  January bug and making historical month re-runs possible within a season.
+- League 8205 folded into 15363 and the Northumberland league rename applied
+  inline; league names sanitised from `DIM.League_Sites` exactly as
+  `SSRS.RefreshFixtureData` did (`&`→and, `/`→space, `:`→space, `+`→plus,
+  `u0026`→and).

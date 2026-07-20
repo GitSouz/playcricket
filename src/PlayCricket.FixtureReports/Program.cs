@@ -53,7 +53,7 @@ else
         Console.Error.WriteLine("PLAYCRICKET_SQL_CONNECTION is not set. Set it, or run with --sample.");
         return 2;
     }
-    dataSource = new SqlReportDataSource(connectionString);
+    dataSource = new SqlReportDataSource(connectionString, Path.Combine(AppContext.BaseDirectory, "Sql"));
 }
 
 string baseDir = AppContext.BaseDirectory;

@@ -16,6 +16,7 @@
   <ItemGroup>
     <None Include="Templates\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Sql\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

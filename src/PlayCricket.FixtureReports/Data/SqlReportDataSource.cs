@@ -4,15 +4,17 @@ using PlayCricket.FixtureReports.Models;
 namespace PlayCricket.FixtureReports.Data;
 
 /// <summary>
-/// Live data source querying the same SSRS.* views the old SSRS report used
-/// (see docs/legacy-rdl-notes.md for the mapping and formulas).
+/// Live data source computing all report figures directly from fact.Fixture,
+/// replacing the legacy refresh procs + snapshot tables + SSRS views chain.
+/// The queries in the Sql/ directory are line-for-line ports of the legacy
+/// stored procedures (see docs/legacy-procs/ and docs/legacy-rdl-notes.md);
+/// percentages use the formulas from the RDL layout.
 ///
-/// Like the old report, the month views (Leagues_ThisMonth, *_Last5Games) are
-/// self-relative to the run date, so this source describes the current
-/// reporting window regardless of the --month argument; the argument is used
-/// for labelling. Parameterising the views by month is a planned follow-up.
+/// Fully parameterised by reporting month, so any historical month can be
+/// re-run — except the season-to-date windows, which still come from
+/// lkp.Season rows flagged C (current) and L (last), as the legacy procs did.
 /// </summary>
-public sealed class SqlReportDataSource(string connectionString) : IReportDataSource
+public sealed class SqlReportDataSource(string connectionString, string sqlDir) : IReportDataSource
 {
     private sealed record Counts(int NoResult, int Abandoned, int Cancelled, int Conceded, int InProgress, int Win, int ShortSided)
     {
@@ -24,177 +26,166 @@ public sealed class SqlReportDataSource(string connectionString) : IReportDataSo
 
     public async Task<IReadOnlyList<LeagueReport>> GetReportsAsync(DateOnly reportMonth, CancellationToken ct = default)
     {
+        var monthStart = new DateOnly(reportMonth.Year, reportMonth.Month, 1);
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        var prevYearMonthStart = monthStart.AddYears(-1);
+        var prevYearMonthEnd = prevYearMonthStart.AddMonths(1).AddDays(-1);
+
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
         var leagues = new List<(int Id, string Name)>();
-        await using (var cmd = new SqlCommand(
-            """
-            SELECT ls.ID_League, ls.Name
-            FROM SSRS.League_Sites ls
-            WHERE ls.ID_League IN (SELECT League_ID FROM SSRS.Leagues_ThisMonth)
-            ORDER BY ls.Name
-            """, conn))
+        await using (var cmd = Command(conn, "LeagueList.sql", p =>
+        {
+            p.AddWithValue("@MonthStart", monthStart);
+            p.AddWithValue("@MonthEnd", monthEnd);
+        }))
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
         {
             while (await reader.ReadAsync(ct))
-                leagues.Add((reader.GetInt32(0), reader.GetString(1)));
+                leagues.Add((Convert.ToInt32(reader.GetValue(0)), reader.GetString(1)));
         }
 
-        var reports = new List<LeagueReport>(leagues.Count);
-        foreach (var (id, name) in leagues)
-            reports.Add(await LoadLeagueAsync(conn, id, name, reportMonth, ct));
-        return reports;
-    }
-
-    private static async Task<LeagueReport> LoadLeagueAsync(SqlConnection conn, int leagueId, string leagueName, DateOnly reportMonth, CancellationToken ct)
-    {
-        int currentYear = reportMonth.Year;
-
-        var monthHeadlines = await QueryYearStatsAsync(conn,
-            """
-            SELECT Year_Of_Fixture,
-                   SUM(ISNULL([No Result], 0)), SUM(ISNULL(Abandoned, 0)), SUM(ISNULL(Cancelled, 0)),
-                   SUM(ISNULL(Conceded, 0)), SUM(ISNULL(InProgress, 0)), SUM(ISNULL(Win, 0)), SUM(ISNULL(ShortSided, 0))
-            FROM SSRS.League_SeasonCurrLast
-            WHERE Name = @LeagueName AND Year_Of_Fixture IN (@Year, @Year - 1)
-            GROUP BY Year_Of_Fixture
-            ORDER BY Year_Of_Fixture DESC
-            """, leagueName, currentYear, ct);
-
-        var seasonHeadlines = await QueryYearStatsAsync(conn,
-            """
-            SELECT Year_of_Fixture,
-                   SUM(ISNULL([No Result], 0)), SUM(ISNULL(Abandoned, 0)), SUM(ISNULL(Cancelled, 0)),
-                   SUM(ISNULL(Conceded, 0)), SUM(ISNULL(InProgress, 0)), SUM(ISNULL(Win, 0)), SUM(ISNULL(ShortSided, 0))
-            FROM SSRS.League_SeasonCurrLast_STD
-            WHERE Name = @LeagueName AND Year_of_Fixture IN (@Year, @Year - 1)
-            GROUP BY Year_of_Fixture
-            ORDER BY Year_of_Fixture DESC
-            """, leagueName, currentYear, ct);
-
-        var monthDivisions = await QueryDivisionStatsAsync(conn,
-            """
-            SELECT Division_Of_Fixture,
-                   ISNULL([No Result], 0), ISNULL(Abandoned, 0), ISNULL(Cancelled, 0),
-                   ISNULL(Conceded, 0), ISNULL(InProgress, 0), ISNULL(Win, 0), ISNULL(ShortSided, 0)
-            FROM SSRS.Leagues_Divisions_ThisMonth
-            WHERE Name = @LeagueName
-            ORDER BY Division_Of_Fixture
-            """, leagueName, ct);
-
-        var seasonDivisions = await QueryDivisionStatsAsync(conn,
-            """
-            SELECT Division_Of_Fixture,
-                   ISNULL([No Result], 0), ISNULL(Abandoned, 0), ISNULL(Cancelled, 0),
-                   ISNULL(Conceded, 0), ISNULL(InProgress, 0), ISNULL(Win, 0), ISNULL(ShortSided, 0)
-            FROM SSRS.Leagues_Divisions_SeasonTD
-            WHERE Name = @LeagueName
-            ORDER BY Division_Of_Fixture
-            """, leagueName, ct);
-
-        var cancelledWatch = new List<CancelledWatchEntry>();
-        await using (var cmd = new SqlCommand(
-            """
-            SELECT Home_Club_Name, Home_Team_Name, Cancelled, ISNULL(Abandoned, 0)
-            FROM SSRS.Leagues_CanxAbandonened_Last5Games
-            WHERE Name = @LeagueName
-            ORDER BY Home_Club_Name, Home_Team_Name
-            """, conn))
+        var monthHeadlines = await ReadYearCountsAsync(conn, "HeadlineMonthCounts.sql", p =>
         {
-            cmd.Parameters.AddWithValue("@LeagueName", leagueName);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            p.AddWithValue("@MonthStart", monthStart);
+            p.AddWithValue("@MonthEnd", monthEnd);
+            p.AddWithValue("@PrevYearMonthStart", prevYearMonthStart);
+            p.AddWithValue("@PrevYearMonthEnd", prevYearMonthEnd);
+        }, ct);
+
+        var seasonHeadlines = await ReadYearCountsAsync(conn, "SeasonCounts.sql", p =>
+        {
+            p.AddWithValue("@ReportMonthNumber", reportMonth.Month);
+        }, ct);
+
+        var monthDivisions = await ReadDivisionCountsAsync(conn, "DivisionMonthCounts.sql", p =>
+        {
+            p.AddWithValue("@MonthStart", monthStart);
+            p.AddWithValue("@MonthEnd", monthEnd);
+        }, ct);
+
+        var seasonDivisions = await ReadDivisionCountsAsync(conn, "DivisionSeasonCounts.sql", p =>
+        {
+            p.AddWithValue("@ReportMonthNumber", reportMonth.Month);
+            p.AddWithValue("@ReportYear", reportMonth.Year);
+        }, ct);
+
+        var cancelledWatch = new Dictionary<int, List<CancelledWatchEntry>>();
+        await using (var cmd = Command(conn, "WatchListCancelled.sql", p =>
+        {
+            p.AddWithValue("@MonthStart", monthStart);
+            p.AddWithValue("@MonthEnd", monthEnd);
+        }))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
             while (await reader.ReadAsync(ct))
-                cancelledWatch.Add(new CancelledWatchEntry
+                Bucket(cancelledWatch, Convert.ToInt32(reader.GetValue(0))).Add(new CancelledWatchEntry
                 {
-                    HomeClubName = reader.GetString(0),
-                    HomeTeamName = reader.GetString(1),
-                    Cancelled = Convert.ToInt32(reader.GetValue(2)),
-                    Abandoned = Convert.ToInt32(reader.GetValue(3)),
+                    HomeClubName = reader.GetString(1),
+                    HomeTeamName = reader.GetString(2),
+                    Cancelled = Convert.ToInt32(reader.GetValue(3)),
+                    Abandoned = Convert.ToInt32(reader.GetValue(4)),
                 });
         }
 
-        var concededWatch = new List<ConcededWatchEntry>();
-        await using (var cmd = new SqlCommand(
-            """
-            SELECT Home_Club_Name, Home_Team_Name, Conceded, ISNULL(ShortSided, 0)
-            FROM SSRS.Leagues_ConcShortTeams_Last5Games
-            WHERE Name = @LeagueName
-            ORDER BY Home_Club_Name, Home_Team_Name
-            """, conn))
+        var concededWatch = new Dictionary<int, List<ConcededWatchEntry>>();
+        await using (var cmd = Command(conn, "WatchListConceded.sql", p =>
         {
-            cmd.Parameters.AddWithValue("@LeagueName", leagueName);
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            p.AddWithValue("@MonthStart", monthStart);
+            p.AddWithValue("@MonthEnd", monthEnd);
+        }))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
             while (await reader.ReadAsync(ct))
-                concededWatch.Add(new ConcededWatchEntry
+                Bucket(concededWatch, Convert.ToInt32(reader.GetValue(0))).Add(new ConcededWatchEntry
                 {
-                    ClubName = reader.GetString(0),
-                    Team = reader.GetString(1),
-                    Conceded = Convert.ToInt32(reader.GetValue(2)),
-                    ShortSided = Convert.ToInt32(reader.GetValue(3)),
+                    ClubName = reader.GetString(1),
+                    Team = reader.GetString(2),
+                    Conceded = Convert.ToInt32(reader.GetValue(3)),
+                    ShortSided = Convert.ToInt32(reader.GetValue(4)),
                 });
         }
 
-        return new LeagueReport
+        return leagues.Select(l => new LeagueReport
         {
-            LeagueId = leagueId,
-            LeagueName = leagueName,
+            LeagueId = l.Id,
+            LeagueName = l.Name,
             ReportMonth = reportMonth,
-            MonthHeadlines = monthHeadlines,
-            SeasonHeadlines = seasonHeadlines,
-            MonthDivisions = monthDivisions,
-            SeasonDivisions = seasonDivisions,
-            CancelledWatchList = cancelledWatch,
-            ConcededWatchList = concededWatch,
-        };
+            MonthHeadlines = YearStatsFor(monthHeadlines, l.Id),
+            SeasonHeadlines = YearStatsFor(seasonHeadlines, l.Id),
+            MonthDivisions = DivisionStatsFor(monthDivisions, l.Id),
+            SeasonDivisions = DivisionStatsFor(seasonDivisions, l.Id),
+            CancelledWatchList = cancelledWatch.TryGetValue(l.Id, out var cw) ? cw : [],
+            ConcededWatchList = concededWatch.TryGetValue(l.Id, out var xw) ? xw : [],
+        }).ToList();
     }
 
-    private static async Task<IReadOnlyList<YearStats>> QueryYearStatsAsync(SqlConnection conn, string sql, string leagueName, int year, CancellationToken ct)
+    private SqlCommand Command(SqlConnection conn, string sqlFile, Action<SqlParameterCollection> addParams)
     {
-        var result = new List<YearStats>();
-        await using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@LeagueName", leagueName);
-        cmd.Parameters.AddWithValue("@Year", year);
+        var cmd = new SqlCommand(File.ReadAllText(Path.Combine(sqlDir, sqlFile)), conn) { CommandTimeout = 300 };
+        addParams(cmd.Parameters);
+        return cmd;
+    }
+
+    private async Task<Dictionary<int, List<(int Year, Counts Counts)>>> ReadYearCountsAsync(
+        SqlConnection conn, string sqlFile, Action<SqlParameterCollection> addParams, CancellationToken ct)
+    {
+        var result = new Dictionary<int, List<(int, Counts)>>();
+        await using var cmd = Command(conn, sqlFile, addParams);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-        {
-            var c = ReadCounts(reader, offset: 1);
-            result.Add(new YearStats
-            {
-                Year = Convert.ToInt32(reader.GetValue(0)),
-                Completed = c.Completed,
-                PlayedPct = c.PlayedPct,
-                CancelledPct = c.Pct(c.Cancelled),
-                AbandonedPct = c.Pct(c.Abandoned),
-                ConcededPct = c.Pct(c.Conceded),
-                ShortSidedPct = c.Pct(c.ShortSided),
-            });
-        }
+            Bucket(result, Convert.ToInt32(reader.GetValue(0)))
+                .Add((Convert.ToInt32(reader.GetValue(1)), ReadCounts(reader, offset: 2)));
         return result;
     }
 
-    private static async Task<IReadOnlyList<DivisionStats>> QueryDivisionStatsAsync(SqlConnection conn, string sql, string leagueName, CancellationToken ct)
+    private async Task<Dictionary<int, List<(string Division, Counts Counts)>>> ReadDivisionCountsAsync(
+        SqlConnection conn, string sqlFile, Action<SqlParameterCollection> addParams, CancellationToken ct)
     {
-        var result = new List<DivisionStats>();
-        await using var cmd = new SqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("@LeagueName", leagueName);
+        var result = new Dictionary<int, List<(string, Counts)>>();
+        await using var cmd = Command(conn, sqlFile, addParams);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-        {
-            var c = ReadCounts(reader, offset: 1);
-            result.Add(new DivisionStats
-            {
-                Division = reader.GetString(0),
-                Completed = c.Completed,
-                PlayedPct = c.PlayedPct,
-                CancelledPct = c.Pct(c.Cancelled),
-                AbandonedPct = c.Pct(c.Abandoned),
-                ConcededPct = c.Pct(c.Conceded),
-                ShortSidedPct = c.Pct(c.ShortSided),
-            });
-        }
+            Bucket(result, Convert.ToInt32(reader.GetValue(0)))
+                .Add((reader.GetString(1), ReadCounts(reader, offset: 2)));
         return result;
     }
+
+    private static List<T> Bucket<T>(Dictionary<int, List<T>> map, int key)
+    {
+        if (!map.TryGetValue(key, out var list))
+            map[key] = list = [];
+        return list;
+    }
+
+    private static IReadOnlyList<YearStats> YearStatsFor(Dictionary<int, List<(int Year, Counts Counts)>> map, int leagueId)
+        => !map.TryGetValue(leagueId, out var rows)
+            ? []
+            : rows.OrderByDescending(r => r.Year).Select(r => new YearStats
+            {
+                Year = r.Year,
+                Completed = r.Counts.Completed,
+                PlayedPct = r.Counts.PlayedPct,
+                CancelledPct = r.Counts.Pct(r.Counts.Cancelled),
+                AbandonedPct = r.Counts.Pct(r.Counts.Abandoned),
+                ConcededPct = r.Counts.Pct(r.Counts.Conceded),
+                ShortSidedPct = r.Counts.Pct(r.Counts.ShortSided),
+            }).ToList();
+
+    private static IReadOnlyList<DivisionStats> DivisionStatsFor(Dictionary<int, List<(string Division, Counts Counts)>> map, int leagueId)
+        => !map.TryGetValue(leagueId, out var rows)
+            ? []
+            : rows.OrderBy(r => r.Division).Select(r => new DivisionStats
+            {
+                Division = r.Division,
+                Completed = r.Counts.Completed,
+                PlayedPct = r.Counts.PlayedPct,
+                CancelledPct = r.Counts.Pct(r.Counts.Cancelled),
+                AbandonedPct = r.Counts.Pct(r.Counts.Abandoned),
+                ConcededPct = r.Counts.Pct(r.Counts.Conceded),
+                ShortSidedPct = r.Counts.Pct(r.Counts.ShortSided),
+            }).ToList();
 
     private static Counts ReadCounts(SqlDataReader reader, int offset) => new(
         NoResult: Convert.ToInt32(reader.GetValue(offset)),
