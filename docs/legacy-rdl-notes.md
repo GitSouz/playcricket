@@ -44,23 +44,41 @@ report always describes the **previous calendar month** relative to run time,
 and the "ThisMonth"/"Last5Games" views are similarly self-relative to the run
 date.
 
-## Open items to verify against the database
+## Confirmed from the SSRS view definitions (docs/legacy-views/)
 
-1. **View definitions** — to confirm exactly how "this month" is derived and
-   whether `League_SeasonCurrLast` is already restricted to the reporting
-   month. Dump them with:
+1. **Month handling confirmed.** `League_SeasonCurrLast` filters
+   `MonthofFixture = DATEPART(month, GETDATE()) - 1` (the previous calendar
+   month) and `_STD` uses `<=` for season-to-date, so the SQL data source's
+   per-year aggregation matches the report exactly. ⚠️ Note the **January
+   bug** in the legacy views: `DATEPART(month, GETDATE()) - 1 = 0` in January,
+   which matches no rows — the old report could never describe December. Fine
+   for a summer season, but the new pipeline should compute the month
+   boundary properly.
+2. **The chart/percentage maths is confirmed identical** —
+   `League_SeasonCurrLast_Pivot` computes `category / Completed` with
+   `Completed = NoResult + Win + Abandoned + Cancelled + Conceded + InProgress`
+   (ShortSided excluded), categories labelled `1. Played` … `5. ShortSided`.
+3. **The year-view chain bottoms out in refreshed tables, not live data.**
+   `League_SeasonCurrLast` unions two *year-specific tables* —
+   `SSRS.Leagues_SeasonTD_2026` and `SSRS.Leagues_2025Season` — and the
+   divisions view reads `SSRS.Leagues_Division_STD_2026`. These (plus
+   `Leagues_ThisMonth`, `Leagues_SeasonTD`, `Leagues_Divisions_ThisMonth`,
+   `Leagues_Divisions_SeasonTD`, `Leagues_CanxAbandonened_Last5Games`,
+   `Leagues_ConcShortTeams_Last5Games`, `League_Sites`) are **tables populated
+   by the SQL Agent refresh job**, not views — they did not appear in the
+   sys.views export. The "2+ games" watch-list threshold therefore lives in
+   whatever populates the `*_Last5Games` tables.
+4. The league ID remap (8205 ↔ 15363, Northumberland rename) appears inside
+   `League_SeasonCurrLast_STD` as well as in the refresh proc.
 
-   ```sql
-   SELECT s.name + '.' + v.name AS view_name, m.definition
-   FROM sys.views v
-   JOIN sys.schemas s ON s.schema_id = v.schema_id
-   JOIN sys.sql_modules m ON m.object_id = v.object_id
-   WHERE s.name = 'SSRS';
-   ```
+## Remaining unknown: the table-refresh logic
 
-2. The "2 or more games" watch-list threshold is not applied in the RDL, so it
-   must be inside the `*_Last5Games` views — verify from the definitions.
-3. Long term: parameterising the views by month (table-valued functions or
-   month-parameter procs) would allow re-running any historical month; today
-   the pipeline must run within the month after the reporting month, exactly
-   like the old process.
+The last missing piece of the legacy chain is the set of stored procedures the
+`PlaycricketV2_SSRS_Refresh` SQL Agent job ran (its steps 1–5) to populate the
+SSRS base tables above from `Fact.Fixture`. Options for the new pipeline:
+
+- **Preferred:** obtain those proc definitions and fold their logic into
+  month-parameterised queries/views over `Fact.Fixture`, removing both the
+  refresh step and the yearly "create the {yyyy} tables" maintenance.
+- **Fallback:** keep running the legacy refresh procs from the job before
+  generating (works unchanged, keeps the yearly table churn).

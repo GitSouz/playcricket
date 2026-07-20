@@ -1,0 +1,1 @@
+    CREATE View [SSRS].[CountyBoards]  as    SELECT Name    FROM [DIM].[CountyBoards]    where Status = 'Active'  Union   SELECT Name    FROM [DIM].[CountyBoards]  where Name = 'Suffolk Cricket Board'  

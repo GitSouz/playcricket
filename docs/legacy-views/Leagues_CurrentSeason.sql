@@ -1,0 +1,1 @@
+  CREATE VIEW [SSRS].[Leagues_CurrentSeason] AS    SELECT DISTINCT League_ID  FROM [SSRS].[League_SeasonCurrLast_STD]  WHERE Year_of_Fixture = YEAR(GETDATE());

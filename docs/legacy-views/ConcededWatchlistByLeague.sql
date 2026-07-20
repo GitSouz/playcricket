@@ -1,0 +1,1 @@
+  CREATE VIEW SSRS.ConcededWatchlistByLeague AS      SELECT LeagueID, COUNT(DISTINCT Home_Club_ID) AS NumClubs    FROM [SSRS].[Leagues_ConcShortTeams_Last5Games]    GROUP BY LeagueID  

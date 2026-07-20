@@ -1,0 +1,1 @@
+                    CREATE View [SSRS].[CountyCricketBoard_SeasonCurrLast]  as    Select * FROM   (  SELECT *      FROM [SSRS].[CountyCricketBoard_STD_2022] a    UNION      Select *   FROM    [SSRS].[CountyCricketBoard_2021Season]     )A     WHere MonthofFixture = DATEPART(month,getdate())-1            

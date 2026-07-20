@@ -1,0 +1,1 @@
+    CREATE VIEW SSRS.CancelledWatchlistByLeague AS      SELECT LeagueID, COUNT(DISTINCT Home_Club_ID) AS NumClubs    FROM [SSRS].[Leagues_CanxAbandonened_Last5Games]    GROUP BY LeagueID  

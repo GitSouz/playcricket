@@ -1,0 +1,1 @@
+          CREATE View [SSRS].[JuniorLeague_Divisions_ThisMonth]  as    Select *   FROM SSRS.JuniorLeagues_Division_STD_2021  where MONTHofFixture = DATEPART(MONTH,getdate())-1        

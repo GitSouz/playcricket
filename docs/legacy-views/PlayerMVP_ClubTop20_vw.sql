@@ -1,0 +1,1 @@
+      CREATE VIEW [SSRS].[PlayerMVP_ClubTop20_vw] AS    SELECT [ClubId]     ,[ClubRanking]     ,[PlayerId]     ,[FirstName]        ,[LastName]     ,[FullName]     ,[TotalPoints]        ,[BattingPoints]        ,[BowlingPoints]        ,[FieldingPoints]        ,[CaptaincyPoints]        ,[WinningTeamPoints]         ,[CurrentDate]    FROM [SSRS].[PlayerMVP_ClubTop20]  
