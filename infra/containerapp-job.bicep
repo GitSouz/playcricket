@@ -27,6 +27,13 @@ param dotdigitalApiUser string
 param dotdigitalApiPassword string
 param dotdigitalParentFolderId string = ''
 
+@description('ACR admin username. Leave blank to pull via the job managed identity instead (which requires an AcrPull role assignment).')
+param acrUsername string = ''
+@secure()
+param acrPassword string = ''
+
+var useAcrAdminCreds = acrUsername != ''
+
 resource job 'Microsoft.App/jobs@2024-03-01' = {
   name: jobName
   location: location
@@ -45,17 +52,23 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
       replicaTimeout: 7200 // 2h ceiling for a full render + upload run
       replicaRetryLimit: 1
       registries: [
-        {
+        useAcrAdminCreds ? {
+          server: '${acrName}.azurecr.io'
+          username: acrUsername
+          passwordSecretRef: 'acr-password'
+        } : {
           server: '${acrName}.azurecr.io'
           identity: 'system'
         }
       ]
-      secrets: [
+      secrets: concat([
         { name: 'sql-connection', value: sqlConnectionString }
         { name: 'archive-storage-connection', value: archiveStorageConnection }
         { name: 'dotdigital-api-user', value: dotdigitalApiUser }
         { name: 'dotdigital-api-password', value: dotdigitalApiPassword }
-      ]
+      ], useAcrAdminCreds ? [
+        { name: 'acr-password', value: acrPassword }
+      ] : [])
     }
     template: {
       containers: [
