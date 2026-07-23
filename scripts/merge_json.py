@@ -22,6 +22,9 @@ Examples
 
     # Recurse into sub-directories, pretty-printed with 2-space indent
     python merge_json.py ./data --recursive -o combined.json --indent 2
+
+    # Split the merged records into files of 100 each: combined_001.json, ...
+    python merge_json.py ./data -o combined.json --batch-size 100
 """
 
 from __future__ import annotations
@@ -125,7 +128,21 @@ def main(argv: list[str] | None = None) -> int:
         default=2,
         help="Indentation for the output (default: 2; use 0 for compact)",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=0,
+        help="Split output into files of at most this many records "
+        "(0 = single file). Requires --output.",
+    )
     args = parser.parse_args(argv)
+
+    if args.batch_size < 0:
+        print("error: --batch-size cannot be negative", file=sys.stderr)
+        return 1
+    if args.batch_size and not args.output:
+        print("error: --batch-size requires --output", file=sys.stderr)
+        return 1
 
     try:
         files = collect_input_files(args.inputs, args.recursive)
@@ -144,16 +161,32 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     indent = args.indent if args.indent > 0 else None
-    text = json.dumps(combined, indent=indent, ensure_ascii=False)
 
-    if args.output:
-        Path(args.output).write_text(text + "\n", encoding="utf-8")
+    def dump(records: list) -> str:
+        return json.dumps(records, indent=indent, ensure_ascii=False)
+
+    if args.batch_size:
+        out = Path(args.output)
+        total = len(combined)
+        batches = [combined[i : i + args.batch_size] for i in range(0, total, args.batch_size)]
+        width = max(3, len(str(len(batches))))
+        for idx, batch in enumerate(batches, start=1):
+            batch_path = out.with_name(f"{out.stem}_{idx:0{width}d}{out.suffix}")
+            batch_path.write_text(dump(batch) + "\n", encoding="utf-8")
+        print(
+            f"Merged {len(files)} file(s) into {total} record(s), "
+            f"written as {len(batches)} file(s) of up to {args.batch_size} "
+            f"(e.g. {out.with_name(f'{out.stem}_{1:0{width}d}{out.suffix}').name})",
+            file=sys.stderr,
+        )
+    elif args.output:
+        Path(args.output).write_text(dump(combined) + "\n", encoding="utf-8")
         print(
             f"Merged {len(files)} file(s) into {len(combined)} record(s) -> {args.output}",
             file=sys.stderr,
         )
     else:
-        print(text)
+        print(dump(combined))
 
     return 0
 
